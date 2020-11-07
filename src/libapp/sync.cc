@@ -7,21 +7,25 @@
 using namespace libapp;
 
 std::string
-libapp::hash(const std::string &fname)
+libapp::hash(const std::string& fname)
 {
-    std::ifstream t(fname);
-    std::string cnt((std::istreambuf_iterator<char>(t)),
+    std::ifstream file(fname);
+    std::string it((std::istreambuf_iterator<char>(file)),
                     std::istreambuf_iterator<char>());
 
-    long long h = 91;
-    for(auto a : cnt)
-        h = (h * 54059) ^ (a * 76963);
-    std::stringstream ss;
-    ss << h;
-    return ss.str();
+    unsigned mask;
+    unsigned crc = 0xFFFFFFFF;
+
+    for (auto byte : it) {
+        crc ^= byte;
+        for (int j = 0; j < 8; ++j) {
+            mask = -(crc & 1);
+            crc = (crc >> 1) ^ (0xEDB88320 & mask);
+        }
+    }
+
+    return std::to_string(~crc);
 }
-
-
 
 size_t write_data(void* ptr, size_t size, size_t nmemb, FILE* fptr)
 {
