@@ -20,7 +20,7 @@
 #define URL_BINARY      "https://manjeet.cloudtb.online/apps"
 
 #define DEFAULT_REPO    "core apps"
-#define VERSION         "0.6.b"
+#define _VERSION         "0.6.b"
 
 #define MODULES_RECIPE  LIBEXEC_DIR "modules/librlxpkg"
 
