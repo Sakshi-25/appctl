@@ -167,7 +167,7 @@ test_unlock_appctl() {
         fi
 
         [[ -f "${CACHE_DIR}/lock" ]] && return 5
-        [[ -d "${CACHE_DIR}"      ]] && return 6
+        [[ -d "${CACHE_DIR}/work" ]] && return 6
         return 0
     }
 
