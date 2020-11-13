@@ -28,10 +28,10 @@ int download_func(cli::data_t& data)
         return 1;
     }
     libapp::ctl::obj appctl(data.value_of("config",CONFIG_FILE));
-    auto e = appctl.download_file(data.args[0], data.args[1], true);
+    auto e = appctl.download_file(data.args[0], data.args[1], data.is_flag_set("show-progress"));
     if (e.status() != 200) {
-        io::error("failed to download file",e.mesg());
-        return e.status();
+        io::error(e.mesg());
+        return -1;
     }
     return 0;
 }
@@ -46,6 +46,9 @@ remove_func(cli::data_t& data)
     std::string app_name = data.args[0];
     libapp::ctl::obj appctl(data.value_of("config",CONFIG_FILE));
     auto e = appctl.Remove(app_name, data.is_flag_set("debug"));
+    if (e.status() != 0) {
+        io::error(e.mesg(), " (",e.status(), ")");
+    }
     return e.status();
 }
 int

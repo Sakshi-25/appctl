@@ -24,16 +24,20 @@ librlxpkg::obj::Install(conf::obj& config, bool debug)
         if (debug) DEBUG ("found ", pkgname, " in cache");
     } else {
 
-        int ret = system(
-            io::sprint("bash -c 'source ",
-            libsh,
-            "RECIPE_FILE=",__rcp_file,
-            "CONFIG_FILE=",config.filename,
+        string _cmd = io::sprint("bash -c '",
+            " source ",
+            libsh,"; ",
+            "RECIPE_FILE=",__rcp_file," "
+            "CONFIG_FILE=",config.filename,"; "
             " rlxpkg_compile ",
             __name, " ",
             __ver,  " ",
             __rel,  " ",
-            pkgfile, "'").c_str()
+            pkgfile, "'");
+        
+        if (debug) DEBUG("executing ", _cmd );
+        int ret = system(
+            _cmd.c_str()
         );
 
         if (WEXITSTATUS(ret) != 0)  return err::obj(err::execution, "failed to compile recipe " + __name);
@@ -46,9 +50,10 @@ librlxpkg::obj::Install(conf::obj& config, bool debug)
 
     int ret = system(
         io::sprint("bash -c 'source ",
-        libsh,
-        "ROOTS=", config.get("dir","roots","/"),
-        "SKIP_EXECS=",config.get("local","skip_execs","0"),
+        libsh," ; ",
+        " ROOT_DIR=", config.get("dir","roots","/"),
+        " SKIP_EXECS=",config.get("local","skip_execs","0"),
+        " DATA_DIR=",config.get("dir","data","/var/lib/app/index"),
         " rlxpkg_install ", pkgfile, "'").c_str()
     );
 

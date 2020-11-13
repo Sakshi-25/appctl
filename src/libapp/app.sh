@@ -1,7 +1,7 @@
 
 debug() {
     [[ -z $DEBUG ]] && return
-    echo -e "\n\033[1;34mDebug\033[0m\033[1m: $@\033[0m"
+    echo -e "DEBUG: $@"
 }
 
 CONFIG_FILE=${CONFIG_FILE:-"/etc/appctl.conf"}
@@ -52,6 +52,7 @@ lock_appctl() {
     echo "${1}" > ${CACHE_DIR}/lock
     return 0
 }
+
 
 # unlock_appctl
 # unlock appctl and clean working directories

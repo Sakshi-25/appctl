@@ -123,22 +123,40 @@ test_rlxpkg_download() {
     case_1() {
         _w_dir=$(create_wdir '_1')
         PATH=$PATH:build/ \
-        rlxpkg_download "rlx.html::https://releax.in"  $_w_dir/
-        _sum=$(sha512sum $_w_dir/rlx.html)
+        rlxpkg_download "https://releax.in"  $_w_dir/
+        _sum=$(sha1sum $_w_dir/releax.in | awk '{print $1}')
         if [[ $? != 0 ]] ; then
             rm -r $_w_dir
             return 1
         fi
 
         rm -r $_w_dir
-        assert_equal "$_sum" ""
+        assert_equal "$_sum" "f59f2ca2922e9ea7ee2309ad4f4e2d1c9be49840"
     }
 
     test_case "for validity of rlxpkg_download" case_1
+
+    case_2() {
+        _w_dir=$(create_wdir '_1')
+        PATH=$PATH:build/ \
+        rlxpkg_download "https://i_am_not_exist/no_me"  $_w_dir/
+
+        if [[ $? != 0 ]] ; then
+            rm -r $_w_dir
+            return 0
+        fi
+
+        rm -r $_w_dir
+        return 1
+    }
+
+    test_case "for validating invalid url" case_2
 }
 
-#test_read_data
 
-#test_execute_script
+
+test_read_data
+
+test_execute_script
 
 test_rlxpkg_download

@@ -22,7 +22,7 @@ void sync_recipe(libapp::ctl::obj& appctl, string url, vector<string> files, str
         if (e.status() != 200) {
             io::warn("failed to sync ", out_file, " from ", file_url, " ", e.mesg());
         } else {
-            io::print("\r completed: ", ((float)++i/(float) files.size()) * 100);
+            fprintf(stderr,".\r %.2f%% completed",((float)++i/(float) files.size()) * 100);
         }
     }
     io::print("\n");
@@ -85,11 +85,12 @@ obj::Sync(conf::obj& conf, bool debug)
                 string repo_id = data.first;
                 string repo_url = data.second;
 
+                string _l_rcpdir = rcp_dir + "/" + repo_id;
                 io::process("syncing ",repo_id);
-                auto to_update = get_outdated_files(appctl, repo_url, rcp_dir);
+                auto to_update = get_outdated_files(appctl, repo_url, _l_rcpdir);
                 if (to_update.size()) {
                     io::info(to_update.size(), " new recipes found");
-                    sync_recipe(appctl, repo_url, to_update, rcp_dir);
+                    sync_recipe(appctl, repo_url, to_update, _l_rcpdir);
                 }
                 
             }

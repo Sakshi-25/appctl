@@ -45,7 +45,6 @@ ctl::obj::Install(const std::string & app, bool debug)
                 io::error("[UnknownError] ",e.mesg());
                 break;
         }
-
         return e;
     }
     return err::obj(0);

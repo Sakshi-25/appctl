@@ -2,15 +2,12 @@
 
 APP_SH=${APP_SH:-"/usr/lib/appctl/app.sh"}
 
-debug() {
-    [[ -z "$DEBUG" ]] && return
-    echo -e "/033[1;32mDebug/033[0m/033[1m: $@/033[0m"
-}
 
 . "${APP_SH}" || {
-    debug "failed to source ${APP_SH}"
+    echo "failed to source ${APP_SH}"
     exit 111
 }
+
 
 RLX_PKG_CONFIG=${RLX_PKG_CONFIG:-"/etc/rlxpkg.conf"}
 [[ -f "${RLX_PKG_CONFIG}" ]] || RLX_PKG_CONFIG="/usr/etc/rlxpkg.conf"
@@ -144,11 +141,14 @@ rlxpkg_download() {
         fi
 
         if [[ "${filename}" != "${s}" ]] ; then
-            appctl "download" "${url}" "${path}/${filename}"
+         if [[ ! -e "${path}/${filename}" ]] ; then
+             wget -c --passive-ftp --no-directories --tries=3 --waitretry=3 --output-document="${path}/${filename}.part" "${url}" -q --show-progress
             if [[ $? != 0 ]] ; then
-                debug "failed to download ${filename}"
+                debug "failed to download ${filename} from ${url}"
                 return $ERR_FAILED_TO_DOWNLOAD
             fi
+            mv ${path}/${filename}{.part,}
+         fi
         else
             [[ ! -f "${filename}" ]] && return $ERR_FILE_NOT_EXIST
         fi
@@ -156,21 +156,21 @@ rlxpkg_download() {
     return 0
 }
 
-# rlxpkg_prepare <source> <path>
+# rlxpkg_prepare <source> <path> <rcp_dir>
 # prepare source files
 rlxpkg_prepare() {
-    [[ -z "${2}" ]] && return 101
+    debug "preparing $_name"
+    [[ -z "${3}" ]] && return 101
 
     local sources="${1}"
     local path="${2}"
+    local _rcp_dir="${3}"
 
     for s in ${sources} ; do
         if echo $s | grep -Eq '::(http|https|ftp)://' ; then
-            local filename=$(echo $s | awk -F '::' '{print $1}')
-            local url=$(echo $s | awk -F '::' '{print $2}')
+            local filename=${path}/$(echo $s | awk -F '::' '{print $1}')
         else
-            local filename=$(basename $s)
-            local url="${s}"
+            local filename=${_rcp_dir}/$(basename $s)
         fi
 
         for noext in ${noextract} ; do
@@ -180,7 +180,10 @@ rlxpkg_prepare() {
             fi
         done
 
-        [[ ! -f "${filename}" ]] && return $ERR_FILE_NOT_EXIST
+        [[ ! -f "${filename}" ]] && {
+            echo "${filename} is missing"
+            return $ERR_FILE_NOT_EXIST
+        }
 
         if [[ "${filename}" != "${file}" ]] && [[ "${nxt}" != 1 ]] ; then
             case "${filename}" in
@@ -227,12 +230,13 @@ rlxpkg_prepare() {
 # rlxpkg_build
 # execute function build
 rlxpkg_build() {
-    [[ "$(id -u)" == 0 ]] || return $ERR_PREMISSION
+    #[[ "$(id -u)" == 0 ]] || return $ERR_PREMISSION
     debug "compiling $name-$version"
-    (set -e -x; build 2>&1)
-    rtn=$?
     
     cd $src >/dev/null
+
+    (set -e -x; build 2>&1)
+    rtn=$?
 
     if [[ "$rtn" != 0 ]] ; then
         debug "compilation error"
@@ -249,7 +253,7 @@ rlxpkg_build() {
 #                       RECIPE_FILE:    recipe file with absolute path
 #                       CONFIG_FILE:    configuration file
 rlxpkg_compile() {
-
+    echo "loading compiler"
     [[ -z "${4}" ]] && return 101
     
     local _name="${1}"
@@ -264,7 +268,9 @@ rlxpkg_compile() {
         return 1
     fi
 
-    if ! lock_appctl &>/dev/null ; then
+    debug "found recipe file ${RECIPE_FILE}"
+
+    if ! lock_appctl "${_name}" &>/dev/null ; then
         debug "failed to lock appctl"
         return $ERR_LOCK_APPCTL_FAILED
     fi
@@ -297,9 +303,10 @@ rlxpkg_compile() {
         return $rtn
     fi
 
-    rlxpkg_prepare "${source}" "${src}"
+    rlxpkg_prepare "${source}" "${src}"  "${RCP_DIR}"
     rtn=$?
     if [[ "$rtn" != 0 ]] ; then
+        debug "failed to prepare source\n exit_code: $rtn"
         unlock_appctl
         return $rtn
     fi
@@ -364,6 +371,7 @@ description: ${description}
 # ENVIRONMENT:
 #                   ROOT_DIR:  install roots
 #                   SKIP_EXECS: skip pre post executions scripts of installations
+#                   DATA_DIR:  data dir
 rlxpkg_install() {
     [[ -z "${1}" ]] && return 101
 
@@ -374,14 +382,21 @@ rlxpkg_install() {
         return $ERR_FILE_NOT_EXIST
     }
 
-    if ! lock_appctl ; then
+    name=$(read_data ${pkgfile} ".data/info" "name")
+    version=$(read_data ${pkgfile} ".data/info" "version")
+    release=$(read_data ${pkgfile} ".data/info" "release")
+
+    if ! lock_appctl ${pkgfile} ; then
         debug "failed to lock appctl"
         return $ERR_LOCK_APPCTL_FAILED
     fi
 
-    name=$(read_data ${pkgfile} ".data/info" "name")
-    version=$(read_data ${pkgfile} ".data/info" "version")
-    release=$(read_data ${pkgfile} ".data/info" "release")
+
+    if [[ -z "$name" ]] || [[ -z "$version" ]] || [[ -z "$release" ]] ; then
+        echo "${pkgfile} is not a valid rlxpkg, meta data is invalid"
+        unlock_appctl
+        return 22
+    fi
 
     [[ "$SKIP_EXECS" ]] || execute_script "${pkgfile}" ".data/install" "pre" "$version" "$release"
     rtn=$?
@@ -392,34 +407,97 @@ rlxpkg_install() {
     fi
 
     # TODO add option to check conficting files
+    ROOT_DIR=${ROOT_DIR:-'/'}
+    [[ ! -d "${ROOT_DIR}" ]] && mkdir -p "${ROOT_DIR}"
 
-    tar --keep-directory-symlink -pxf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${ROOT_DIR}" | while read -r line ; do
-        if [[ "$line" = "${line%.*}.new" ]] ; then
+    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
+
+    tar --keep-directory-symlink -pxvf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${ROOT_DIR}/" | while read -r line ; do
+        [[ "${line:0:1}" == "." ]] && {
+            debug "skipping ${line} hidden data"
+            continue
+        }
+        if [[ "$line" == "${line%.*}.new" ]] ; then
             line="${line%.*}"
-
             mv "${ROOT_DIR}/${line}.new" "${ROOT_DIR}/${line}"
         fi
-        debug "extracted $line"
-        echo "$line" >> $WORK_DIR/$name.files
+        echo "$line" >> "${WORK_DIR}/${name}.files"
     done
 
-    local _data_dir=$(read_config "${CONFIG_FILE}" "dir" "data")
-
-    rm -rf $_data_dir/$name
+    DATA_DIR=${DATA_DIR:-"/var/lib/app/index/"}
+    [[ -d ${DATA_DIR} ]] || mkdir -p "$DATA_DIR"
+    rm -rf ${DATA_DIR}/${name}
 
     tar -xf "${pkgfile}" -C $WORK_DIR .data
-    mv $WORK_DIR/.data $_data_dir/${name}
+    mv $WORK_DIR/.data "$DATA_DIR/${name}"
 
-    mv $WORK_DIR/${name}.files $_data_dir/${name}/files
+    mv "$WORK_DIR/${name}.files" "$DATA_DIR/${name}/files"
 
-    echo -e "\ninstalled on: $(date +'%I:%M:%S %p %D:%m:%Y')" >> $_data_dir/${name}/info
+    echo -e "\ninstalled on: $(date +'%I:%M:%S %p %D:%m:%Y')" >> "$DATA_DIR/${name}/info"
 
     [[ "$SKIP_EXECS" ]] || execute_script "${pkgfile}" ".data/install" "post" "$version" "$release"
 
-    if [[ -x "${ROOT_DIR}/sbin/ldconfig" ]] ; then
-        "$ROOT_DIR/sbin/ldconfig" -r "${ROOT_DIR}/"
+    if [[ -x "${ROOT_DIR}/usr/sbin/ldconfig" ]] ; then
+        "$ROOT_DIR/usr/sbin/ldconfig" -r "${ROOT_DIR}/"
     fi
 
     unlock_appctl
     return 0
+}
+
+# rlxpkg_remove <app_id>
+# remove app from system
+# ENVIRONMENT:          ROOT_DIR:   root directory
+#                       DATA_DIR:   data base dir
+#                       SKIP_EXEC:  to skip pre or post removal expr
+rlxpkg_remove() {
+    [[ -z "${1}" ]] && return 101
+
+    local _app_id="${1}"
+
+    if ! lock_appctl "${_app_id}" ; then
+        return $ERR_LOCK_APPCTL_FAILED
+    fi
+
+    DATA_DIR=${DATA_DIR:-'/var/lib/app/index'}
+    [[ ! -f "${DATA_DIR}/${_app_id}/info" ]] && {
+        unlock_appctl
+        return 15
+    }
+
+    _read_info() {
+        cat "${DATA_DIR}/${_app_id}/info" 2>/dev/null | grep "^${1}:" | awk -F ': ' '{print $2}'
+    }
+
+    _name=$(_read_info 'name')    
+    _ver=$(_read_info 'version')
+    _rel=$(_read_info 'release')
+
+    [[ ! -f "${DATA_DIR}/${_app_id}/files" ]] && {
+        unlock_appctl
+        return 16
+    }
+
+    if [[ "${ROOT_DIR}" == '/' ]] ; then
+        _xectr="bash"
+    else
+        _xectr="xchroot ${ROOT_DIR}"
+    fi
+
+    if [[ -f "${DATA_DIR}/${_app_id}/remove" ]] ; then
+        (cd "${ROOT_DIR}"; $_xectr "${DATA_DIR}/${_app_id}/remove" "pre" "$_name" "$_ver" "$_rel")
+    fi
+
+    for i in $(cat ${DATA_DIR}/${_app_id}/files) ; do
+        rm -f "${ROOT_DIR}/${i}" &>/dev/null
+    done
+
+    if [[ -f "${DATA_DIR}/${_app_id}/remove" ]] ; then
+        (cd "${ROOT_DIR}"; $_xectr "${DATA_DIR}/${_app_id}/remove" "post" "$_name" "$_ver" "$_rel")
+    fi
+
+    rm -r "${DATA_DIR}/${_name}"
+
+    unlock_appctl
+
 }
