@@ -9,7 +9,9 @@ int hash_func(cli::data_t& data)
         io::error("input file");
         return -2;
     }
-    io::fprint(std::cout, libapp::hash(data.args[0]));
+    std::string _file = data.args.at(0);
+    io::fprint(std::cout, libapp::hash(_file));
+    return 0;
 }
 int sync_func(cli::data_t& data)
 {

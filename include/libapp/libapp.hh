@@ -48,7 +48,7 @@ namespace libapp {
     };
 
     typedef std::vector<libapp::obj*> app_list_t;
-    std::string hash(const std::string& f);
+    std::string hash(std::string f);
 
     namespace ctl {
         class obj {

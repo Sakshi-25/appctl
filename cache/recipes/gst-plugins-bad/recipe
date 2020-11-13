@@ -1,0 +1,25 @@
+# Description: Set of plug-ins that aren't up to par compared to the rest
+# URL: https://gstreamer.freedesktop.org/
+# Depends on: gobject-introspection gst-plugins-base gstreamer glib libvdpau libx11 curl openjpeg2 libxml2 soundtouch librsvg cairo bzip2 lcms2 libdrm libressl pango wayland libdvdnav libdvdread nettle
+
+name=gst-plugins-bad
+version=1.18.0
+release=2
+source="https://gstreamer.freedesktop.org/src/gst-plugins-bad/$name-$version.tar.xz"
+
+build() {
+	cd $name-$version
+
+	mkdir build
+        cd build
+
+        meson \
+		--prefix=/usr \
+		--libexecdir=lib \
+		-Dgst_debug=false \
+		-Dgtk_doc=disabled \
+		-Dnls=disabled \
+		-Dpackage-name="GStreamer Bad Plugins $version (rlx os)"
+	ninja
+	DESTDIR=$pkg ninja install
+}

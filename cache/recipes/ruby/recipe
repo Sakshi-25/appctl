@@ -1,0 +1,18 @@
+# Description: Ruby development environment
+# URL: https://www.ruby-lang.org/en/
+# Depends on: zlib gmp libressl libffi readline ncurses gdbm
+
+name=ruby
+version=2.7.2
+release=2
+source="https://cache.ruby-lang.org/pub/$name/${version%.*}/$name-$version.tar.xz"
+
+build() {
+	cd $name-$version
+
+	./configure --prefix=/usr   \
+        	    --enable-shared \
+		    --disable-install-doc
+	make
+	make DESTDIR=$pkg install
+}

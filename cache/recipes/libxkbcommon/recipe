@@ -1,0 +1,20 @@
+# Description: keymap compiler and support library
+# URL: https://xkbcommon.org/
+# Depends on: libxcb wayland-protocols meson
+
+name=libxkbcommon
+version=1.0.1
+release=1
+source="https://xkbcommon.org/download/$name-$version.tar.xz"
+
+build() {
+	cd $name-$version
+
+	mkdir build
+	cd build
+
+	meson --prefix=/usr \
+	      -Denable-docs=false
+	ninja
+	DESTDIR=$pkg ninja install
+}

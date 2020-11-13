@@ -1,0 +1,48 @@
+# Description: Print spooler and associated utilities
+# URL: https://www.cups.org/
+# Depends on: linux-pam acl dbus zlib gnutls libusb
+
+name=cups
+version=2.3.3
+release=1
+source="https://github.com/apple/cups/releases/download/v$version/$name-$version-source.tar.gz
+	run"
+
+build() {
+	cd $name-$version
+
+	sed -i 's:444:644:' Makedefs.in
+	sed -i '/MAN.EXT/s:.gz::' configure config-scripts/cups-manpages.m4
+	
+	aclocal  -I config-scripts
+	autoconf -I config-scripts
+	
+	CC=gcc CXX=g++ \
+	./configure --libdir=/usr/lib            \
+	            --disable-systemd            \
+	            --with-rcdir=/tmp/cupsinit   \
+	            --with-system-groups=lpadmin \
+	            --with-docdir=/usr/share/$name/doc
+	make
+	make BUILDROOT=$pkg install
+
+	# remove cups init script
+	rm -fr $pkg/tmp
+
+	# Create a basic Cups client configuration file
+	echo "ServerName /var/run/cups/cups.sock" > $pkg/etc/cups/client.conf
+
+	# Linux PAM Configuration
+	mkdir -p $pkg/etc/pam.d
+	cat > $pkg/etc/pam.d/cups << "EOF"
+auth    include system-auth
+account include system-auth
+session include system-auth
+EOF
+
+	rm -fr $pkg/var/run
+
+	# runit service
+        install -Dm755 $src/run $pkg/etc/sv/cupsd/run
+        ln -s /run/runit/supervise.cupsd $pkg/etc/sv/cupsd/supervise
+}

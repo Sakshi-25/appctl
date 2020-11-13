@@ -1,0 +1,30 @@
+# Description: rlxos base libraries
+# URL: https://github.com/rlxos/librlx
+
+name=librlx
+version=0.1.1
+release=1
+
+source="$name-$version.tar.gz::https://github.com/rlxos/librlx/archive/0.1.0.tar.gz"
+
+build() {
+	cd $name-$version
+	
+	for i in src/librlx/*.cc include/rlx/*.hh ; do
+		sed -i 's|uint |int |g' $i
+	done
+	
+	sed -i 's|uint|int|g' src/librlx/fs.cc
+	mkdir -pv build
+	[[ ! -e /bin/project ]] && {
+	g++ -fPIC -std=c++17 -shared -I include/ -o build/librlx.so src/librlx/*.cc
+	} || {
+	project build librlx
+	}
+		
+	install -vdm755 $pkg/usr/include/
+	cp include/* $pkg/usr/include/ -r
+	
+	install -vDm755 build/librlx.so $pkg/usr/lib/librlx.so.$version
+	ln -sv librlx.so.$version $pkg/usr/lib/librlx.so
+}

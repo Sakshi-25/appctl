@@ -5,7 +5,72 @@
 #include <math.h>
 
 using namespace librlxpkg;
+using namespace std;
 
+void sync_recipe(libapp::ctl::obj& appctl, string url, vector<string> files, string loc) {
+    int i = 0;
+
+    for(auto file : files) {
+        string file_url = url + "/" + file;
+        string out_file = loc + "/" + file;
+
+        string __dir = out_file;
+        __dir = string(dirname((char*)__dir.c_str()));
+        fs::make_dir(__dir);
+
+        err::obj e = appctl.download_file(file_url, out_file, false);
+        if (e.status() != 200) {
+            io::warn("failed to sync ", out_file, " from ", file_url, " ", e.mesg());
+        } else {
+            io::print("\r completed: ", ((float)++i/(float) files.size()) * 100);
+        }
+    }
+    io::print("\n");
+}
+
+map<string, string>
+get_hash_file(string file)
+{
+    ifstream fptr(file);
+    if (!fptr.good()) {
+        io::error("failed to load meta file '", file, "'");
+        return map<string, string>();
+    }
+
+    map<string, string> hash_data;
+    string _hash, file_addr;
+    string line;
+    while (!fptr.eof()) {
+        fptr >> _hash >> file_addr;
+        hash_data.insert(make_pair(_hash, file_addr));
+    }
+
+    return hash_data;
+}
+
+vector<string>
+get_outdated_files(libapp::ctl::obj & appctl, string url, string loc)
+{
+    string meta_file_url = url + "/rcp.meta";
+    string meta_file_loc = "/tmp/.rcp.meta";
+    auto e = appctl.download_file(meta_file_url, meta_file_loc);
+    if (e.status() != 200) {
+        io::error("failed to download meta data from ", meta_file_url);
+        return vector<string>();
+    }
+
+    auto hash_data = get_hash_file(meta_file_loc);
+    vector<string> to_update;
+    for(auto a : hash_data) {
+        string file_loc = loc + "/" + a.second;
+        string _hash = libapp::hash(file_loc);
+        if (a.first != _hash) {
+            to_update.push_back(a.second);
+        }
+    }
+
+    return to_update;
+}
 
 err::obj
 obj::Sync(conf::obj& conf, bool debug)
@@ -13,82 +78,20 @@ obj::Sync(conf::obj& conf, bool debug)
     auto rcp_dir = conf.get("dir","recipes",RECIPES_DIR);
 
     libapp::ctl::obj appctl(conf.filename);
-    for (auto a : conf.sections)
-    {
-        if (a.first == "source.url")
-        {
-            for(auto b : a.second)
-            {
-                io::info("syncing ",b.first);
-                auto data_file = io::sprint(b.second,"/rcp.meta");
-                if (debug) io::info("downloading data file ",data_file);
-                err::obj e = appctl.download_file(data_file, "/tmp/.appctl.meta", true);
-                if (e.status() != 200) {
-                    io::error("failed to sync ",b.first," ",e.mesg());
-                    continue;
+    for (auto sec : conf.sections) {
+        string sec_id = sec.first;
+        if (sec_id == "url.src") {
+            for(auto data : sec.second) {
+                string repo_id = data.first;
+                string repo_url = data.second;
+
+                io::process("syncing ",repo_id);
+                auto to_update = get_outdated_files(appctl, repo_url, rcp_dir);
+                if (to_update.size()) {
+                    io::info(to_update.size(), " new recipes found");
+                    sync_recipe(appctl, repo_url, to_update, rcp_dir);
                 }
-
-                std::ifstream fptr("/tmp/.appctl.meta");
-
-                std::string line;
-                std::vector<std::string> fileslist;
-
-                int new_rcps = 0;
-                int updted_rcps = 0;
-
-                if (fptr.good()) {
-                    while(std::getline(fptr, line))
-                    {
-                        int rdx = line.find_first_of(' ');
-                        auto file_addr = line.substr(rdx + 1, line.length() - (rdx + 1));
-                        auto file_hash = line.substr(0, rdx);
-
-                        if (file_addr[0] == '.' && file_addr[1] == '/');
-                            file_addr = file_addr.substr(2, file_addr.length() - 2);
-
-                        auto abs_file_addr = rcp_dir + "/" + b.first + "/" + file_addr;
-                        std::string local_file_hash;
-                        if (fs::is_exist(abs_file_addr)) {
-                            local_file_hash = libapp::hash(abs_file_addr);
-                            if (local_file_hash != file_hash) {
-                                if (file_addr.length() >= 7 && file_addr.substr(file_addr.length() - 7, 7) == "/recipe")
-                                {
-                                    updted_rcps++;
-                                }
-                                fileslist.push_back(file_addr);
-                            }
-                        } else {
-                            if (file_addr.length() >= 7 && file_addr.substr(file_addr.length() - 7, 7) == "/recipe")
-                                new_rcps++;
-                            fileslist.push_back(file_addr);
-                        }
-
-                    }
-                }
-                if (new_rcps)     io::info(color::gencode(color::green),new_rcps,color::reset(), color::bold(), " new recipes");
-                if (updted_rcps)  io::info(color::gencode(color::green),updted_rcps,color::reset(), color::bold(), " recipes updates");
-
-
-                int i = 1;
-                for(auto file_addr : fileslist)
-                {
-                    auto abs_file_addr = rcp_dir + "/" + b.first + "/" + file_addr;
-                    auto cpy_abs_file_addr = std::string(abs_file_addr);
-                    auto abs_file_dir = dirname((char*)cpy_abs_file_addr.c_str());
-
-                    fs::make_dir(abs_file_dir);
-
-                    io::fprint(std::cerr,"updating ", b.first, " ", ceilf((((float)i++/ (float)fileslist.size()) * 100) * 100) / 100, "%      ");
-
-                    auto file_url = b.second + "/" + file_addr;
-                    if (debug) io::info("downloading data file ",file_url," -> ", file_addr);
-                    err::obj e = appctl.download_file(file_url, abs_file_addr);
-                    if (e.status() != 200) {
-                        io::error("failed to get file ", file_addr, " ",e.mesg());
-                        continue;
-                    }
-                    std::cout << "  \r";
-                }
+                
             }
         }
     }

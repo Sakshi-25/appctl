@@ -3,7 +3,7 @@
 APP_SH=${APP_SH:-"/usr/lib/appctl/app.sh"}
 
 debug() {
-    [[ -z $DEBUG ]] && return
+    [[ -z "$DEBUG" ]] && return
     echo -e "/033[1;32mDebug/033[0m/033[1m: $@/033[0m"
 }
 
@@ -44,9 +44,16 @@ read_data() {
     local tarfile="${1}"
     local file="${2}"
     local var="${3}"
-    tar -C ${WORK_DIR} -xf ${tarfile} --"${COMPRESS_ALGO}" "${file}"
 
-    cat "${WORK_DIR}/${file}" | grep "^${var}:" | awk -F ': ' '{print $2}'
+    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
+
+    tar -C ${WORK_DIR} -xf ${tarfile} --"${COMPRESS_ALGO}" "${file}" &>/dev/null
+    rtn=$?
+    if [[ $? != 0 ]] ; then
+        return $rtn
+    fi
+
+    cat "${WORK_DIR}/${file}" 2>/dev/null | grep "^${var}:" | awk -F ': ' '{print $2}'
 
     unlock_appctl
     return 0
@@ -82,23 +89,32 @@ execute_script() {
     local tarfile="${1}"
     shift
 
-    local file="${2}"
+    local file="${1}"
     shift
     
     if ! lock_appctl ; then
         exit 64
     fi
 
-    if tar -C ${WORK_DIR} -tf ${tarfile} --"${COMPRESS_ALGO}" "${file}" >/dev/null 2>&1 ; then
+    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
+    ROOT_DIR=${ROOT_DIR:-'/'}
+    if tar -tf ${tarfile} --"${COMPRESS_ALGO}" "${file}" >/dev/null 2>&1 ; then
         
         tar -C ${WORK_DIR} -xf ${tarfile} --"${COMPRESS_ALGO}" "${file}"
-
+        rtn=$?
+        if [[ $rtn != 0 ]] ; then
+            debug "failed extract file"
+            return $rtn
+        fi
         ROOT_DIR=${ROOT_DIR:-'/'}
         [[ "$ROOT_DIR" = '/' ]] && executor="bash" || executor="xchroot $ROOT_DIR"
 
         debug "executing ${file} via ${executor}"
         (cd "${ROOT_DIR}"; ${executor} "${WORK_DIR}/${file}" $@)
 
+    else
+        unlock_appctl
+        return 5
     fi
 
     unlock_appctl
@@ -134,7 +150,7 @@ rlxpkg_download() {
                 return $ERR_FAILED_TO_DOWNLOAD
             fi
         else
-            if [[ ! -f "${filename}" ]] && return $ERR_FILE_NOT_EXIST
+            [[ ! -f "${filename}" ]] && return $ERR_FILE_NOT_EXIST
         fi
     done
     return 0
@@ -164,7 +180,7 @@ rlxpkg_prepare() {
             fi
         done
 
-        if [[ ! -f "${filename}" ]] && return $ERR_FILE_NOT_EXIST
+        [[ ! -f "${filename}" ]] && return $ERR_FILE_NOT_EXIST
 
         if [[ "${filename}" != "${file}" ]] && [[ "${nxt}" != 1 ]] ; then
             case "${filename}" in
@@ -254,6 +270,8 @@ rlxpkg_compile() {
     fi
 
     RCP_DIR=$(dirname ${RECIPE_FILE})
+    _old_pwd="${PWD}"
+
     cd "${RCP_DIR}" &>/dev/null
 
     . recipe || {
@@ -313,16 +331,27 @@ description: ${description}
         [[ -f $RCP_DIR/$i ]] && cp $RCP_DIR/$i ${_app_data}/$i
     done
 
+    cd "${pkg}" >/dev/null
 
-    EXTRA_FILES=" $pkg/.data" \
-    compress_package "${pkg}" "${pkgfile}"
+    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
+    case $COMPRESS_ALGO in
+        gzip|xz|zstd|bzip2)
+            ;;
+        
+        *)
+            debug "unsupported compression algo specified: ${COMPRESS_ALOG}"
+            return 103
+            ;;
+    esac
+
+    tar -cf "${pkgfile}" --"${COMPRESS_ALGO}" * .data 
     rtn=$?
     if [[ "$rtn" != 0 ]] ; then
         unlock_appctl
         return $rtn
     fi
 
-    cd - &>/dev/null
+    cd "${_old_pwd}" &>/dev/null
 
     unlock_appctl
     return 0

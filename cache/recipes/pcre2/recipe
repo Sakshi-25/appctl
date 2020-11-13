@@ -1,0 +1,28 @@
+# Description: New generation of the Perl Compatible Regular Expression libraries
+# URL: https://www.pcre.org/
+# Depends on: readline zlib bzip2
+
+name=pcre2
+version=10.35
+release=1
+source="https://ftp.pcre.org/pub/pcre/$name-$version.tar.bz2"
+
+build() {
+	if [ "$BOOTSTRAP" ]; then
+		flags="--host=$TARGET --build=$HOST"
+	fi
+
+	cd $name-$version
+	./configure $flags \
+		    --prefix=/usr                       \
+	            --enable-unicode                    \
+		    --enable-jit                        \
+	            --enable-pcre2-16                   \
+	            --enable-pcre2-32                   \
+	            --enable-pcre2grep-libz             \
+	            --enable-pcre2grep-libbz2           \
+	            --enable-pcre2test-libreadline      \
+	            --disable-static
+	make
+	make DESTDIR=$pkg install
+}

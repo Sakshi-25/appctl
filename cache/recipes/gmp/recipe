@@ -1,0 +1,23 @@
+# Description: Contains math libraries that useful functions for arbitrary precision arithmetic
+# URL: https://gmplib.org/
+
+name=gmp
+version=6.2.0
+release=1
+source="https://ftp.gnu.org/gnu/gmp/$name-$version.tar.xz"
+
+build() {
+
+	cd $name-$version
+
+	./configure		\
+		    --prefix=/usr \
+	            --enable-cxx \
+	            --disable-static	\
+	            --docdir=/usr/share/doc/$name
+	make
+	make check 2>&1 | tee /var/log/gmp-check.log || true
+	awk '/# PASS:/{total+=$3} ; END{print total}' /var/log/gmp-check.log
+	
+	make DESTDIR=$pkg install
+}

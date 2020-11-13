@@ -66,47 +66,6 @@ unlock_appctl() {
     return 0
 }
 
-# compress_package <dir> <aout>
-# compress the content of <dir> into tar package with name <aout>
-# ENVIRONMENT:
-#              COMPRESS_ALGO:  tar compression algo
-#                             - gzip
-#                             - xz
-#                             - zstd
-#                             - bzip2
-#              EXTRA_FILES:    extra files need to be included
-#                              e.g. hidden files .data
-compress_package() {
-    [[ -z "$1" ]] && return 101
-    [[ -z "$2" ]] && return 101
-
-    local tar_dir="$1"
-    local aout="$2"
-
-    cd "${tar_dir}" >/dev/null
-
-    debug "compressing ${aout}"
-
-    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
-    case $COMPRESS_ALGO in
-        gzip|xz|zstd|bzip2)
-            ;;
-
-        *) 
-            debug "unsupported compression algo specified: ${COMPRESS_ALGO}"
-            return 103
-            ;;
-    esac
-
-    tar -cf "${aout}" --"${COMPRESS_ALGO}" * ${EXTRA_FILES}
-    if [[ $? != 0 ]] ; then
-        debug "failed to compress ${aout} ${dir} with ${COMPRESSION_ALGO}"
-        return 200
-    fi
-
-    cd - >/dev/null
-
-}
 
 
 # extract_package <package> <loc>

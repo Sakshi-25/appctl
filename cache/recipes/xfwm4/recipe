@@ -1,0 +1,16 @@
+# Description: Window manager for Xfce
+# URL: http://www.xfce.org/
+# Depends on: libxfce4util libsm libice libx11 libxext libxi gtk3 pango harfbuzz atk cairo gdk-pixbuf glib libxfce4ui xfconf libwnck3 libxcomposite libxdamage libxfixes libepoxy startup-notification libxrandr libxrender libxinerama
+
+name=xfwm4
+version=4.15.1
+release=1
+source="http://archive.xfce.org/src/xfce/xfwm4/${version%.*}/$name-$version.tar.bz2"
+
+build() {
+	cd $name-$version
+
+	./configure --prefix=/usr --disable-nls
+	make
+	make DESTDIR=$pkg install
+}

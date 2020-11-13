@@ -1,0 +1,20 @@
+# Description: Python2 bindings for PyGObject3
+# Depends on: glib cairo gobject-introspection libffi python2 python2-cairo
+
+name=python2-gobject3
+version=3.38.0
+release=1
+source="https://ftp.gnome.org/pub/gnome/sources/pygobject/${version::4}/pygobject-$version.tar.xz"
+
+build() {
+	cd pygobject-$version
+
+	mkdir build
+	cd build
+
+	meson --prefix=/usr -Dpython=python2 ..
+	ninja
+	DESTDIR=$pkg ninja install
+
+	rm -fr $pkg/usr/{include/,lib/pkgconfig/}
+}

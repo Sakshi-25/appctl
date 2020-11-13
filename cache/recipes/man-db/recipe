@@ -1,0 +1,35 @@
+# Description: Programs for finding and viewing man pages
+# URL: https://www.nongnu.org/man-db/
+# Depends on: gdbm zlib libpipeline
+
+name=man-db
+version=2.9.3
+release=1
+source="https://savannah.nongnu.org/download/man-db/$name-$version.tar.xz"
+
+build() {
+	cd $name-$version
+	
+	export CFLAGS+=" -I/usr/include/gettext"
+	export LDFLAGS+=" -lintl"
+	./configure					\
+		    --prefix=/usr                    	\
+		    --docdir=/usr/share/doc/$name	\
+		    --sysconfdir=/etc                    \
+		    --disable-setuid                     \
+		    --enable-cache-owner=bin             \
+		    --with-browser=/usr/bin/lynx         \
+		    --with-vgrind=/usr/bin/vgrind        \
+		    --with-grap=/usr/bin/grap            \
+		    --with-systemdtmpfilesdir=           \
+		    --with-systemdsystemunitdir=         \
+		    --with-pager=less                    \
+		    --disable-rpath                      \
+		    --enable-threads=posix               \
+		    --without-included-regex             \
+		    --enable-automatic-create 
+	make
+	make DESTDIR=$pkg install
+	
+	unset CFLAGS LDFLAGS
+}
