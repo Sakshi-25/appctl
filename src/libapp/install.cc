@@ -13,24 +13,34 @@ ctl::obj::Install(const std::string & app, bool debug)
         auto app_data = is_installed(app, debug);
         if (app_data.installed) return err::obj(112, app + " is already installed");
 
-        if (!skip_dep) {
-            auto deps = cal_dep(app_ptr, debug);
-            err::obj e(0);
-            if (deps.size() > 0) {
-                io::print("install dependencies [");
-                for(auto a : deps) io::print(" ",a->name());
-                io::print(" ]\n");
+        auto deps = cal_dep(app_ptr, debug);
+        io::process("checking dependencies....");
+        
+        err::obj e(0);
+        if (deps.size() > 1) {
+            io::print("require dependencies [");
+            for(auto a : deps) io::print(" ",a->name());
+            io::print(" ]\n");
+        }
+
+        if (deps.size() > 1 && !skip_dep) {
+            
+            
+            for(auto a = deps.begin(); a != deps.end() - 1; a++) {
+                auto _a = *a;
+                io::process("installing dependency ",_a->name());
+                e = _a->Install(config, debug);
+                if (e.status() != 0) {
+                    io::error("failed to install ",_a->name());
+                    io::error(e.mesg(), " (",e.status(),")");
+                    return e;
+                }
             }
 
-            for(auto a : deps) {
-                io::process("install dependency ",a->name());
-                e = a->Install(config, debug);
-                if (e.status() != 0) return e;
-            }
-            return e;
-        } else {
-            return app_ptr->Install(config, debug);
-        }
+        } 
+        
+        return app_ptr->Install(config, debug);
+        
     } catch (err::obj e) {
         switch (e.status()) {
             case err::file_missing: 

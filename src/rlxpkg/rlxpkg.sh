@@ -1,174 +1,77 @@
-#!/bin/bash
-
-APP_SH=${APP_SH:-"/usr/lib/appctl/app.sh"}
-
-
-. "${APP_SH}" || {
-    echo "failed to source ${APP_SH}"
-    exit 111
+_test_func() {
+    echo "$1"
 }
 
-
-RLX_PKG_CONFIG=${RLX_PKG_CONFIG:-"/etc/rlxpkg.conf"}
-[[ -f "${RLX_PKG_CONFIG}" ]] || RLX_PKG_CONFIG="/usr/etc/rlxpkg.conf"
-[[ -f "${RLX_PKG_CONFIG}" ]] && . "${RLX_PKG_CONFIG}"
-
-
-ERR_LOCK_APPCTL_FAILED=66
-ERR_RECIPE_VERIFY_FAILED=67
-ERR_FAILED_TO_DOWNLOAD=68
-ERR_FILE_NOT_EXIST=69
-ERR_FAILED_TO_EXTRACT=70
-ERR_PREMISSION=71
-
-# read_data <tarfile> <file> <variable>
-# read data of <file> for <tarfile> and <variable> (':' seperated value)
-# ENVIRONMENT:
-#              COMPRESS_ALGO:  tar compression algo
-#                             - gzip
-#                             - xz
-#                             - zstd
-#                             - bzip2
-#              WORK_DIR:       working directory
-#
-read_data() {
-    [[ -z "${2}" ]] && return 101
-
-    if ! lock_appctl ; then
-        exit 64
-    fi
-    
-    local tarfile="${1}"
-    local file="${2}"
-    local var="${3}"
-
-    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
-
-    tar -C ${WORK_DIR} -xf ${tarfile} --"${COMPRESS_ALGO}" "${file}" &>/dev/null
-    rtn=$?
-    if [[ $? != 0 ]] ; then
-        return $rtn
-    fi
-
-    cat "${WORK_DIR}/${file}" 2>/dev/null | grep "^${var}:" | awk -F ': ' '{print $2}'
-
-    unlock_appctl
-    return 0
-}
-
-
-# verify_pkg <rlxpkg>
-# verify is <rlxpkg> is a vaild releax package
-# Return:    0 - verification fail
-#            1 - verification pass
-verify_pkg() {
-    local rlxpkg="${1}"
-    [[ ! -e "${rlxpkg}" ]] && return 101
-
-    pass=1
-
-    for i in name version release description ; do
-        local data=$(read_data ${rlxpkg} '.data/info' "${i}")
-        if [[ -z "${data}" ]] ; then
-            pass=0
-        fi
-    done
-
-    return ${pass}
-}
-
-# execute_script <tarfile> <file> <args...>
-# execute script from tarfile
-# Environment:
-#                       ROOT_DIR: root directory
-#
-execute_script() {
-    local tarfile="${1}"
-    shift
-
-    local file="${1}"
-    shift
-    
-    if ! lock_appctl ; then
-        exit 64
-    fi
-
-    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
-    ROOT_DIR=${ROOT_DIR:-'/'}
-    if tar -tf ${tarfile} --"${COMPRESS_ALGO}" "${file}" >/dev/null 2>&1 ; then
-        
-        tar -C ${WORK_DIR} -xf ${tarfile} --"${COMPRESS_ALGO}" "${file}"
-        rtn=$?
-        if [[ $rtn != 0 ]] ; then
-            debug "failed extract file"
-            return $rtn
-        fi
-        ROOT_DIR=${ROOT_DIR:-'/'}
-        [[ "$ROOT_DIR" = '/' ]] && executor="bash" || executor="xchroot $ROOT_DIR"
-
-        debug "executing ${file} via ${executor}"
-        (cd "${ROOT_DIR}"; ${executor} "${WORK_DIR}/${file}" $@)
-
-    else
-        unlock_appctl
-        return 5
-    fi
-
-    unlock_appctl
-
-    return 0
-
-}
-
-
-# rlxpkg_download <source> <path>
+# rlxpkg_download <rcp> <path>
 # download every source file from <source> to <path>
 # ENVIRONMENT:          REDOWNLOAD: redownload
+#                       WGET_ARGS:  wget args
+#
+# Error Code:           5: invalid argumets
+#                       6: failed to load recipe file
+#                       7: failed to download source file
+#                       8: failed to check downloaded files
 rlxpkg_download() {
 
-    [[ -z "${2}" ]] && return 101
+    [[ -z "${2}" ]] && return 5
 
-    local sources="${1}"
+    local rcp="${1}"
     local path="${2}"
 
-    for s in ${sources} ; do
+    . ${rcp} || return 6
+
+    for s in ${source[@]} ; do
         if echo $s | grep -Eq '::(http|https|ftp)://' ; then
             local filename=$(echo $s | awk -F '::' '{print $1}')
             local url=$(echo $s | awk -F '::' '{print $2}')
         else
-            local filename=$(basename $s)
+            local filename="$(basename $s)"
             local url="${s}"
         fi
 
         if [[ "${filename}" != "${s}" ]] ; then
          if [[ ! -e "${path}/${filename}" ]] ; then
-             wget -c --passive-ftp --no-directories --tries=3 --waitretry=3 --output-document="${path}/${filename}.part" "${url}" -q --show-progress
+             wget -c --passive-ftp --no-directories --tries=3 --waitretry=3 --output-document="${path}/${filename}.part" "${url}" ${WGET_ARGS}
             if [[ $? != 0 ]] ; then
                 debug "failed to download ${filename} from ${url}"
-                return $ERR_FAILED_TO_DOWNLOAD
+                return 7
             fi
             mv ${path}/${filename}{.part,}
          fi
-        else
-            [[ ! -f "${filename}" ]] && return $ERR_FILE_NOT_EXIST
         fi
     done
     return 0
 }
 
-# rlxpkg_prepare <source> <path> <rcp_dir>
+# rlxpkg_prepare <rcp_file> <spath> <path>
 # prepare source files
+# 
+# Error Codes:              5: invalid arguments
+#                           6: failed to load recipe file
+#                           7: specified source file missing
+#                           8: failed to prepare source file 
+#                           9: failed to copying file
 rlxpkg_prepare() {
-    debug "preparing $_name"
-    [[ -z "${3}" ]] && return 101
+    [[ -z "${3}" ]] && return 5
 
-    local sources="${1}"
-    local path="${2}"
-    local _rcp_dir="${3}"
+    local rcpfile="${1}"
+    local spath="${2}"
+    local path="${3}"
+    local _rcp_dir=$(dirname $rcpfile)
+    
+    [[ ! -d ${path} ]] && mkdir -p $path
 
-    for s in ${sources} ; do
+    . $rcpfile || return 6
+
+    _debug() {
+        [[ -z "$DEBUG" ]] && return
+        echo "rlxpkg_install: $@"
+    }
+
+
+    for s in ${source[@]} ; do
         if echo $s | grep -Eq '::(http|https|ftp)://' ; then
-            local filename=${path}/$(echo $s | awk -F '::' '{print $1}')
+            local filename=${spath}/$(echo $s | awk -F '::' '{print $1}')
         else
             local filename=${_rcp_dir}/$(basename $s)
         fi
@@ -182,7 +85,7 @@ rlxpkg_prepare() {
 
         [[ ! -f "${filename}" ]] && {
             echo "${filename} is missing"
-            return $ERR_FILE_NOT_EXIST
+            return 7
         }
 
         if [[ "${filename}" != "${file}" ]] && [[ "${nxt}" != 1 ]] ; then
@@ -201,23 +104,23 @@ rlxpkg_prepare() {
                             CMS=J
                             ;;
                     esac
-                    debug "extracting $(basename $filename)"
+                    _debug "extracting $(basename $filename)"
                     tar -C "${path}" -${CMS} -xf "${filename}"
                     ;;
                 
                 *)
-                    debug "copying $(basename $filename)"
+                    _debug "copying $(basename $filename)"
                     cp "${filename}" "${path}"
                     ;;
             esac
             if [[ "$?" != 0 ]] ; then
-                return $ERR_FAILED_TO_EXTRACT
+                return 8
             fi
         else
             debug "copying $(basname $filename)"
             cp "${filename}" "${path}"
             if [[ "$?" != 0 ]] ; then
-                return $ERR_FAILED_TO_EXTRACT
+                return 9
             fi
         fi
 
@@ -227,101 +130,76 @@ rlxpkg_prepare() {
 
 
 
-# rlxpkg_build
+# rlxpkg_build <rcp_file> <src> <pkg>
 # execute function build
+# Error Code:               5: invalid arguments
+#                           6: failed to load source file
+#                           7: failed to compile source
 rlxpkg_build() {
-    #[[ "$(id -u)" == 0 ]] || return $ERR_PREMISSION
-    debug "compiling $name-$version"
-    
+        
+    [[ -z "${3}" ]] && return 5
+    local _rcp_file="${1}"
+    local src=${2}
+    local pkg=${3}
+
+    . $_rcp_file || return 6
+
+    export src
+    export pkg
+
     cd $src >/dev/null
 
-    (set -e -x; build 2>&1)
-    rtn=$?
+    (set -e -x; build 2>&1) || return 7
 
-    if [[ "$rtn" != 0 ]] ; then
-        debug "compilation error"
-    fi
-
-    cd - >/dev/null
-
-    return $rtn
+    return 0
 }
 
-# rlxpkg_compile <name> <version> <release> <pkgfile>
+
+# rlxpkg_genpkg <rcp_file> <spkg> <pkgdir>
+# ENVIRONMENT:              COMPRESS_ALGO: compression algo
+#
+# Error Code:               5: invalid args
+#                           6: failed to source recipe file
+#                           7: failed to compress package
+rlxpkg_genpkg() {
+    [[ -z "${3}" ]] && return 5
+
+    local _rcp_file="${1}"
+    local pkg="${2}"
+    local pkgdir="${3}"
+    
+    local rcp_dir="$(dirname $_rcp_file)"
+
+    COMPRESS_ALGO=${COMPRESS_ALOG:-"zstd"}
+
+    . $_rcp_file || return 6
+
+    local pkgfile="${name}-${version}-${release}-$(uname -m).rlx"
+
+    cd $pkg &>/dev/null
+
+    mkdir -p .data
+    echo "name: $name
+version: $version
+release: $release" > .data/info
+
+    for _i in install remove update usrgrp data ; do
+        [[ -f "$rcp_dir/$_i" ]] && cp "$rcp_dir/$i" .data/
+    done
+
+    tar -cf "${pkgdir}/${pkgfile}" --"${COMPRESS_ALGO}" * .data || return  7
+
+    return 0
+}
+
+# rlxpkg_compile <name> <version> <releas> <description>
 # read recipe file and generate <pkgfile>
 # ENVIRONMENT: 
 #                       RECIPE_FILE:    recipe file with absolute path
 #                       CONFIG_FILE:    configuration file
 rlxpkg_compile() {
-    echo "loading compiler"
-    [[ -z "${4}" ]] && return 101
+
     
-    local _name="${1}"
-    local _ver="${2}"
-    local _rel="${3}"
-    local pkgfile="${4}"
-
-    RECIPE_FILE=${RECIPE_FILE:-"$PWD/recipe"}
-
-    if [[ ! -f ${RECIPE_FILE} ]] ; then
-        debug "failed to find $RECIPE_FILE"
-        return 1
-    fi
-
-    debug "found recipe file ${RECIPE_FILE}"
-
-    if ! lock_appctl "${_name}" &>/dev/null ; then
-        debug "failed to lock appctl"
-        return $ERR_LOCK_APPCTL_FAILED
-    fi
-
-    RCP_DIR=$(dirname ${RECIPE_FILE})
-    _old_pwd="${PWD}"
-
-    cd "${RCP_DIR}" &>/dev/null
-
-    . recipe || {
-        unlock_appctl
-
-        return $ERR_RECIPE_MISSING
-    }
-
-    if [[ "$_name" != "$name" ]] || [[ "$_ver" != "$version" ]] || [[ "$_rel" != "$release" ]] ; then
-        unlock_appctl
-        return $ERR_RECIPE_VERIFY_FAILED
-    fi
-
-    src="${WORK_DIR}/${name}/src"
-    pkg="${WORK_DIR}/${name}/pkg"
-
-    mkdir -p "${src}" "${pkg}"
-
-    rlxpkg_download "${source}" "${src}"
-    rtn=$?
-    if [[ $rtn != 0 ]] ; then
-        unlock_appctl
-        return $rtn
-    fi
-
-    rlxpkg_prepare "${source}" "${src}"  "${RCP_DIR}"
-    rtn=$?
-    if [[ "$rtn" != 0 ]] ; then
-        debug "failed to prepare source\n exit_code: $rtn"
-        unlock_appctl
-        return $rtn
-    fi
-
-    rlxpkg_build
-    rtn=$?
-    if [[ "$rtn" != 0 ]] ; then
-        unlock_appctl
-        return $rtn
-    fi
-
-    [[ $nostrip ]] || {
-        strip_package "${pkg}"
-    }
-
     # generate app data
     local _app_data="${pkg}/.data"
     mkdir -pv "${_app_data}"
@@ -369,52 +247,85 @@ description: ${description}
 # rlxpkg_install <pkgfile>
 # install <pkgfile> in ROOT_DIR
 # ENVIRONMENT:
-#                   ROOT_DIR:  install roots
-#                   SKIP_EXECS: skip pre post executions scripts of installations
-#                   DATA_DIR:  data dir
+#                   ROOT_DIR:      install roots
+#                   SKIP_EXECS:    skip pre post executions scripts of installations
+#                   DATA_DIR:      data dir
+#                   COMPRESS_ALOG: compression algo
+#
+# Error Code:       5: invalid args
+#                   6: pkgfile not found
+#                   7: invalid package
+#                   8: information data missing
+#                   9: failed to execute pre install script
 rlxpkg_install() {
-    [[ -z "${1}" ]] && return 101
+    [[ -z "${1}" ]] && return 5
 
     local pkgfile="${1}"
+    local COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
+    local WORK_DIR=${WORK_DIR:-'/var/cache/'}
+    local ROOT_DIR=${ROOT_DIR:-'/'}
+    local DATA_DIR=${DATA_DIR:-"/var/lib/app/index/"}
+    local SKIP_EXECS=${SKIP_EXECS:-1}
+    local DEBUG=0
 
-    [[ ! -f "${pkgfile}" ]] && {
-        debug "${pkgfile} not exist"
-        return $ERR_FILE_NOT_EXIST
+    _debug() {
+        [[ "$DEBUG" ]] && return
+        echo "rlxpkg_install: $@"
     }
 
-    name=$(read_data ${pkgfile} ".data/info" "name")
-    version=$(read_data ${pkgfile} ".data/info" "version")
-    release=$(read_data ${pkgfile} ".data/info" "release")
+    [[ ! -f "${pkgfile}" ]] && {
+        _debug "${pkgfile} not exist"
+        return 6
+    }
 
-    if ! lock_appctl ${pkgfile} ; then
-        debug "failed to lock appctl"
-        return $ERR_LOCK_APPCTL_FAILED
-    fi
+    [[ -d "${WORK_DIR}" ]] && rm -r "${WORK_DIR}"
+    mkdir -p "${WORK_DIR}"
+    
+    tar -xf "${pkgfile}" --"${COMPRESS_ALOG}" -C "$WORK_DIR/" .data/info &>/dev/null || {
+        return 7
+    }
+
+    _read_data() {
+        cat "${WORK_DIR}/.data/info" 2>/dev/null | grep "^${1}:" | awk -F ': ' '{print $2}'
+    }
+
+    name=$(_read_data "name")
+    version=$(_read_data "version")
+    release=$(_read_data "release")
 
 
     if [[ -z "$name" ]] || [[ -z "$version" ]] || [[ -z "$release" ]] ; then
-        echo "${pkgfile} is not a valid rlxpkg, meta data is invalid"
-        unlock_appctl
-        return 22
+        _data=$(cat "${WORK_DIR}/.data/info")
+        _debug "${pkgfile} is not a valid rlxpkg, meta data is invalid"
+        return 8
     fi
 
-    [[ "$SKIP_EXECS" ]] || execute_script "${pkgfile}" ".data/install" "pre" "$version" "$release"
-    rtn=$?
-    if [[ $rtn != 0 ]] ; then
-        debug "failed to execute pre install script"
-        unlock_appctl
-        return $rtn
-    fi
+    _execute_script() {
+        if [[ "${ROOT_DIR}" == "/" ]] ; then
+            _xectr="bash"
+        else
+            _xectr="xchroot '${ROOT_DIR}'"
+        fi
+
+        _xectr $@
+    }
+
+    tar -xf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${WORK_DIR}/" .data/install &>/dev/null && {
+        $_xectr "${WORK_DIR}/.data/install" "pre" "$version" "$release"
+        if [[ $? != 0 ]] ; then
+            _debug "failed to execute pre install script"
+            return 9
+        fi
+    }
 
     # TODO add option to check conficting files
-    ROOT_DIR=${ROOT_DIR:-'/'}
+    
     [[ ! -d "${ROOT_DIR}" ]] && mkdir -p "${ROOT_DIR}"
 
-    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
 
     tar --keep-directory-symlink -pxvf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${ROOT_DIR}/" | while read -r line ; do
         [[ "${line:0:1}" == "." ]] && {
-            debug "skipping ${line} hidden data"
+            _debug "skipping ${line} hidden data"
             continue
         }
         if [[ "$line" == "${line%.*}.new" ]] ; then
@@ -424,7 +335,7 @@ rlxpkg_install() {
         echo "$line" >> "${WORK_DIR}/${name}.files"
     done
 
-    DATA_DIR=${DATA_DIR:-"/var/lib/app/index/"}
+    
     [[ -d ${DATA_DIR} ]] || mkdir -p "$DATA_DIR"
     rm -rf ${DATA_DIR}/${name}
 
@@ -435,13 +346,18 @@ rlxpkg_install() {
 
     echo -e "\ninstalled on: $(date +'%I:%M:%S %p %D:%m:%Y')" >> "$DATA_DIR/${name}/info"
 
-    [[ "$SKIP_EXECS" ]] || execute_script "${pkgfile}" ".data/install" "post" "$version" "$release"
+    tar -xf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${WORK_DIR}/" .data/install &>/dev/null && {
+        $_xectr "${WORK_DIR}/.data/install" "post" "$version" "$release"
+        if [[ $? != 0 ]] ; then
+            _debug "failed to execute post install script"
+            return 9
+        fi
+    }
 
     if [[ -x "${ROOT_DIR}/usr/sbin/ldconfig" ]] ; then
-        "$ROOT_DIR/usr/sbin/ldconfig" -r "${ROOT_DIR}/"
+        "$ROOT_DIR/"usr/sbin/ldconfig "${ROOT_DIR}/" &>/dev/null || return 0
     fi
 
-    unlock_appctl
     return 0
 }
 
@@ -455,13 +371,8 @@ rlxpkg_remove() {
 
     local _app_id="${1}"
 
-    if ! lock_appctl "${_app_id}" ; then
-        return $ERR_LOCK_APPCTL_FAILED
-    fi
-
     DATA_DIR=${DATA_DIR:-'/var/lib/app/index'}
     [[ ! -f "${DATA_DIR}/${_app_id}/info" ]] && {
-        unlock_appctl
         return 15
     }
 
@@ -474,7 +385,6 @@ rlxpkg_remove() {
     _rel=$(_read_info 'release')
 
     [[ ! -f "${DATA_DIR}/${_app_id}/files" ]] && {
-        unlock_appctl
         return 16
     }
 
@@ -497,7 +407,5 @@ rlxpkg_remove() {
     fi
 
     rm -r "${DATA_DIR}/${_name}"
-
-    unlock_appctl
 
 }

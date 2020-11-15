@@ -13,6 +13,7 @@ ctl::obj::get_app(const std::string & app_id, bool debug)
         }
         delete m;
     }
+    if (debug) io::error(11,"no module found to handle " + app_id);
     //throw err::obj(-176, "unable to find "+ app_id + " in repository");
     return nullptr;
 }

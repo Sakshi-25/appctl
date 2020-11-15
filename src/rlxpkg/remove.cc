@@ -7,6 +7,8 @@ err::obj
 obj::Remove(conf::obj & _conf, bool debug)
 {
     
+    libapp::ctl::obj _appctl(config.filename);
+
     string libsh = config.get("dir","libexec",LIBEXEC_DIR);
     string data_dir = config.get("dir","data", DATA_DIR);
     string root_dir = config.get("dir", "roots", ROOT_DIR);
@@ -17,6 +19,12 @@ obj::Remove(conf::obj & _conf, bool debug)
 
     if (! fs::is_exist(data_dir + "/" + __name + "/info")) {
         return err::obj(0x14, __name + " is not already installed");
+    }
+
+    auto _e = _appctl.lock_appctl(__name);
+    if (_e.status())
+    {
+        return _e;
     }
     
     io::process("removing ", __name);
@@ -33,6 +41,12 @@ obj::Remove(conf::obj & _conf, bool debug)
     if (debug) DEBUG("executing ", _cmd);
 
     int ret = system(_cmd.c_str());
+
+    _e = _appctl.unlock_appctl(__name);
+    if (_e.status())
+    {
+        return _e;
+    }
 
     switch (WEXITSTATUS(ret)) {
         case 101:

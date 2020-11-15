@@ -120,3 +120,61 @@ ctl::obj::load_modules(std::string id, std::string path)
     modules[id] = mod;
 
 }
+
+
+err::obj
+ctl::obj::lock_appctl(string id)
+{
+    string cache_dir = config.get("dir","cache",CACHE_DIR);
+    string lock_file = cache_dir + "/lock";
+
+    if (fs::is_exist(lock_file)) {
+        ifstream fptr(lock_file);
+        string _lock_id;
+        fptr >> _lock_id;
+        fptr.close();
+
+        return err::obj(err::already_exist, "appctl database is locked by " + _lock_id);
+    }
+
+    if (debug) io::log("locking appctl");
+    try {
+        if (!fs::is_exist(cache_dir)) fs::make_dir(cache_dir);
+        // locking database
+        fs::write(lock_file, id);
+    } catch(err::obj e) {
+            return e;
+    }
+    
+
+    string work_dir = config.get("dir","work", io::sprint(cache_dir,"/work"));
+    string pkg_dir  = config.get("dir", "pkg", io::sprint(cache_dir,"/pkg"));
+    string src_dir  = config.get("dir", "src", io::sprint(cache_dir,"/src"));
+
+
+    return err::obj(0);
+}
+
+err::obj
+ctl::obj::unlock_appctl(string id)
+{
+    string cache_dir = config.get("dir", "cache", CACHE_DIR);
+    string lock_file = cache_dir + "/lock";
+
+    if (!fs::is_exist(lock_file)) {
+        return err::obj(err::file_missing, "appctl is not locked");
+    }
+
+    ifstream fptr(lock_file);
+    string _lock_id;
+    fptr >> _lock_id;
+    fptr.close();
+
+    if (id != _lock_id) {
+        return err::obj(err::invalid_permission, "appctl is locked by " + _lock_id);
+    }
+
+    remove(lock_file.c_str());
+
+    return err::obj(0);
+}

@@ -5,9 +5,11 @@
 #include <rlx/rlx.hh>
 #include "../default.hh"
 
+
 #define DEBUG(...) if (debug) io::colored_title(color::blue,"DEBUG",__VA_ARGS__);
 
 using namespace rlx;
+using namespace std;
 
 namespace libapp {
 
@@ -53,6 +55,7 @@ namespace libapp {
     namespace ctl {
         class obj {
             conf::obj config;
+            bool debug = false;
         public:
             bool reinstall, redownload, repack, update, skip_dep, skip_pre, skip_post;
             std::string flags;
@@ -84,6 +87,11 @@ namespace libapp {
             err::obj register_data(app_db_t, bool debug);
             //std::vector<std::shared_ptr<rlxpkg::obj>>
             //    calculate_depends(std::shared_ptr<rlxpkg::obj>)
+
+        
+            err::obj lock_appctl(string id);
+
+            err::obj unlock_appctl(string id);
 
         };
     }
