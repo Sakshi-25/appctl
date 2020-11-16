@@ -14,7 +14,7 @@ ctl::obj::Install(const std::string & app, bool debug)
         if (app_data.installed) return err::obj(112, app + " is already installed");
 
         auto deps = cal_dep(app_ptr, debug);
-        io::process("checking dependencies....");
+        io::process("checking dependencies");
         
         err::obj e(0);
         if (deps.size() > 1) {

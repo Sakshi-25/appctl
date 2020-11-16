@@ -59,9 +59,15 @@ namespace libapp {
         public:
             bool reinstall, redownload, repack, update, skip_dep, skip_pre, skip_post;
             std::string flags;
-            obj(const std::string& config)
-            : config(config)
+            obj(const std::string& __c)
             {
+                try {
+                    config = conf::obj(__c);
+                } catch (err::obj e) {
+                    if (e.status() != err::file_missing) {
+                        throw e;
+                    }
+                }
                 load_modules();
             }
             libapp::obj* get_app(const std::string& a, bool debug = false);

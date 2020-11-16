@@ -202,14 +202,22 @@ int main(int ac, char** av) {
     cli::obj app(ac, av);
 
     app.id("appctl")
-       .ver("0.1.0")
-       .about("rlxos package manager tool")
+       .ver("0.1.1")
+       .about("an advance and extensible package manager for releax os")
        .sub(cli::sub_t{
            .id = "install",
            .desc = "install specified application from recipe, name, compressed package",
            .usage = "app-name | .rlx file | recipe-loc",
            .func = install_func
        })
+       
+       .sub(cli::sub_t{
+           .id = "remove",
+           .desc = "remove app from root directory",
+           .usage = "app-name",
+           .func = remove_func
+       })
+
        .sub(cli::sub_t{
            .id = "info",
            .desc = "print information of <app>",
@@ -218,44 +226,40 @@ int main(int ac, char** av) {
        })
 
        .sub(cli::sub_t{
-           .id = "list-files",
-           .desc = "list content of install <app>",
-           .usage = "app-name",
-           .func = list_func
-       })
-
-       .sub(cli::sub_t{
-           .id = "cal-dep",
-           .desc = "calculate required dependencies of <app>",
-           .usage = "app-name",
-           .func = cal_dep_func
-       })
-       .sub(cli::sub_t{
-           .id = "verify-config",
-           .desc = "print configuration file",
-           .usage = "section.variable",
-           .func = verify_config_func
-       })
-       .sub(cli::sub_t{
-           .id = "remove",
-           .desc = "remove app from root directory",
-           .usage = "app-name",
-           .func = remove_func
-       })
-       .sub(cli::sub_t{
-           .id = "download",
-           .desc = "download file specified",
-           .usage = "<url> <file>",
-           .func = download_func
-       })
-       .sub(cli::sub_t{
            .id = "sync",
            .desc = "sync data from modules",
            .usage = "",
            .func = sync_func
        })
+
        .sub(cli::sub_t{
-           .id = "gen-hash",
+           .id = "_lsfiles",
+           .desc = "list content of install <app>",
+           .usage = "",
+           .func = list_func
+       })
+
+       .sub(cli::sub_t{
+           .id = "depends",
+           .desc = "calculate required dependencies of <app>",
+           .usage = "app-name",
+           .func = cal_dep_func
+       })
+       .sub(cli::sub_t{
+           .id = "_vrfyconf",
+           .desc = "print configuration file",
+           .usage = "section.variable",
+           .func = verify_config_func
+       })
+       .sub(cli::sub_t{
+           .id = "_dwnld",
+           .desc = "download file specified",
+           .usage = "<url> <file>",
+           .func = download_func
+       })
+       
+       .sub(cli::sub_t{
+           .id = "_genhash",
            .desc = "generate hash sum of input file",
            .usage = "file",
            .func = hash_func
@@ -264,7 +268,7 @@ int main(int ac, char** av) {
     try {
         return app.run().status();
     } catch(err::obj e) {
-        io::error(e.mesg());
+        io::error(e.mesg(), "(",e.status(),")");
     }
     return -1;
 }

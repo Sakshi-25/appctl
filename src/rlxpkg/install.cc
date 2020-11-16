@@ -217,7 +217,7 @@ librlxpkg::obj::Install(conf::obj& config, bool debug)
 
     }
 
-    io::process("installing ", __name, "....");
+    io::process("installing ", __name);
     if (debug) DEBUG("package file ", pkgfile);
 
     string _cmd =

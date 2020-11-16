@@ -178,10 +178,16 @@ rlxpkg_genpkg() {
 
     cd $pkg &>/dev/null
 
+    desc=$(cat "${_rcp_file}" | grep '# Description: ' | sed 's|# Description: ||g')
+    _dps=$(cat "${_rcp_file}" | grep '# Runtime: ' | sed 's|# Runtime: ||g')
+
     mkdir -p .data
     echo "name: $name
 version: $version
-release: $release" > .data/info
+release: $release
+description: $desc
+size: $(du -hs | cut -f1)
+depends: $_dps" > .data/info
 
     for _i in install remove update usrgrp data ; do
         [[ -f "$rcp_dir/$_i" ]] && cp "$rcp_dir/$i" .data/
@@ -344,7 +350,7 @@ rlxpkg_install() {
 
     mv "$WORK_DIR/${name}.files" "$DATA_DIR/${name}/files"
 
-    echo -e "\ninstalled on: $(date +'%I:%M:%S %p %D:%m:%Y')" >> "$DATA_DIR/${name}/info"
+    echo -e "\ninstalled: $(date +'%I:%M:%S %p %D:%m:%Y')" >> "$DATA_DIR/${name}/info"
 
     tar -xf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${WORK_DIR}/" .data/install &>/dev/null && {
         $_xectr "${WORK_DIR}/.data/install" "post" "$version" "$release"
