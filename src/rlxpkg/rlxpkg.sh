@@ -149,7 +149,10 @@ rlxpkg_build() {
 
     cd $src >/dev/null
 
-    (set -e -x; build 2>&1) || return 7
+    (set -e -x; build 2>&1)
+    if [[ $? != 0 ]] ; then
+        return 7
+    fi
 
     return 0
 }

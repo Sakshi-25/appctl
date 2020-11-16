@@ -169,7 +169,7 @@ librlxpkg::obj::Install(conf::obj& config, bool debug)
 
             }
 
-            if (ret) {
+            if (ret != 0) {
                 _appctl.unlock_appctl(__name);
                 return err::obj(ret, _mesg);
             }
