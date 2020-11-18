@@ -2,6 +2,13 @@ _test_func() {
     echo "$1"
 }
 
+interrupted() {
+    echo "interrupted detected"
+    exit 5
+}
+
+trap "interrupted" 1 2 3 15
+
 # rlxpkg_download <rcp> <path>
 # download every source file from <source> to <path>
 # ENVIRONMENT:          REDOWNLOAD: redownload
