@@ -72,6 +72,8 @@ rlxpkg_prepare() {
     for s in ${source[@]} ; do
         if echo $s | grep -Eq '::(http|https|ftp)://' ; then
             local filename=${spath}/$(echo $s | awk -F '::' '{print $1}')
+        elif echo $s | grep -Eq '^(http|https|ftp)://' ; then
+            local filename=${spath}/$(basename $s)
         else
             local filename=${_rcp_dir}/$(basename $s)
         fi
