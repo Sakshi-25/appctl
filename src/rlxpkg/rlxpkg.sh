@@ -7,6 +7,10 @@ interrupted() {
     exit 5
 }
 
+APPCTL_SPECS="/etc/appctl.specs.sh"
+
+[[ -f $APPCTL_SPECS ]] && . $APPCTL_SPECS
+
 trap "interrupted" 1 2 3 15
 
 # rlxpkg_download <rcp> <path>
@@ -24,6 +28,11 @@ rlxpkg_download() {
 
     local rcp="${1}"
     local path="${2}"
+    
+    _debug() {
+        [[ -z $DEBUG ]] && return
+        echo "Debug: $@"
+    }
 
     . ${rcp} || return 6
 
@@ -40,7 +49,7 @@ rlxpkg_download() {
          if [[ ! -e "${path}/${filename}" ]] ; then
              wget -c --passive-ftp --no-directories --tries=3 --waitretry=3 --output-document="${path}/${filename}.part" "${url}" ${WGET_ARGS}
             if [[ $? != 0 ]] ; then
-                debug "failed to download ${filename} from ${url}"
+                _debug "failed to download ${filename} from ${url}"
                 return 7
             fi
             mv ${path}/${filename}{.part,}
@@ -126,7 +135,7 @@ rlxpkg_prepare() {
                 return 8
             fi
         else
-            debug "copying $(basname $filename)"
+            debug "copying $(basename $filename)"
             cp "${filename}" "${path}"
             if [[ "$?" != 0 ]] ; then
                 return 9
