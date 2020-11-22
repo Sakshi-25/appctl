@@ -135,7 +135,7 @@ rlxpkg_prepare() {
                 return 8
             fi
         else
-            debug "copying $(basename $filename)"
+            _debug "copying $(basename $filename)"
             cp "${filename}" "${path}"
             if [[ "$?" != 0 ]] ; then
                 return 9
@@ -231,6 +231,8 @@ depends: $_dps" > .data/info
 # ENVIRONMENT:
 #                   NO_STRIP:   list of files to skip stripping
 #                   CROSS_COMPILE: cross-compiler if useds
+#                   DEBUG: debug 
+#                   REMOVE_DOCS: remove docs
 #   
 # Error Codes:
 #                   5: invalid arguments
@@ -240,6 +242,11 @@ strip_package() {
     [[ -z "${2}" ]] && return 5
     local _dir=${1}
     local _rcpfile=${2}
+
+    _debug() {
+        [[ -z $DEBUG ]] && return
+        echo "Debug: $@"
+    }
 
     source $_rcpfile || return 6
     
@@ -303,6 +310,13 @@ strip_package() {
 			done
 		)
 	fi
+
+    if [[ "${REMOVE_DOCS}" ]] ; then
+        _debug "removing doc file"
+        for i in doc gtk-doc info ; do
+            rm -rf usr/share/${i} usr/${i} usr/local/${i} usr/local/share/${i}
+        done
+    fi
 
 }
 
