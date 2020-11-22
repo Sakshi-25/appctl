@@ -219,56 +219,6 @@ depends: $_dps" > .data/info
     return 0
 }
 
-# rlxpkg_compile <name> <version> <releas> <description>
-# read recipe file and generate <pkgfile>
-# ENVIRONMENT: 
-#                       RECIPE_FILE:    recipe file with absolute path
-#                       CONFIG_FILE:    configuration file
-rlxpkg_compile() {
-
-    
-    # generate app data
-    local _app_data="${pkg}/.data"
-    mkdir -pv "${_app_data}"
-    
-echo "
-name: ${name}
-version: ${version}
-release: ${release}
-description: ${description}
-" > "${_app_data}/info"
-    
-
-    for i in install update remove usrgrp data ; do
-        [[ -f $RCP_DIR/$i ]] && cp $RCP_DIR/$i ${_app_data}/$i
-    done
-
-    cd "${pkg}" >/dev/null
-
-    COMPRESS_ALGO=${COMPRESS_ALGO:-"zstd"}
-    case $COMPRESS_ALGO in
-        gzip|xz|zstd|bzip2)
-            ;;
-        
-        *)
-            debug "unsupported compression algo specified: ${COMPRESS_ALOG}"
-            return 103
-            ;;
-    esac
-
-    tar -cf "${pkgfile}" --"${COMPRESS_ALGO}" * .data 
-    rtn=$?
-    if [[ "$rtn" != 0 ]] ; then
-        unlock_appctl
-        return $rtn
-    fi
-
-    cd "${_old_pwd}" &>/dev/null
-
-    unlock_appctl
-    return 0
-}
-
 
 
 # rlxpkg_install <pkgfile>
