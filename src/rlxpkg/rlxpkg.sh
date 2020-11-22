@@ -220,6 +220,58 @@ depends: $_dps" > .data/info
 }
 
 
+# strip_package <dir> <rcp_file>
+# strip binaries, libaries and clean empty directories etc
+# ENVIRONMENT:
+#                   NO_STRIP:   list of files to skip stripping
+#                   CROSS_COMPILE: cross-compiler if useds
+#   
+# Error Codes:
+#                   5: invalid arguments
+#                   6: failed to source recipe file                
+strip_package() {
+    # taken for scartchpkg https://github.com/venomlinux/scratchpkg/blob/master/pkgbuild
+    [[ -z "${2}" ]] && return 5
+    local _dir=${1}
+    local _rcpfile=${2}
+
+    source $_rcpfile || return 6
+    
+    cd "$_dir" &>/dev/null
+
+    if [ "$NO_STRIP" ]; then
+		for i in $NO_STRIP; do
+			xstrip="$xstrip -e $i"
+		done
+		FILTER="grep -v $xstrip"
+	else
+		FILTER="cat"
+	fi
+			
+	find . -type f -printf "%P\n" 2>/dev/null | $FILTER | while read -r binary ; do
+		case "$(file -bi "$binary")" in
+			*application/x-sharedlib*)  # Libraries (.so)
+				${CROSS_COMPILE}strip --strip-unneeded "$binary" 2>/dev/null ;;
+			*application/x-pie-executable*)  # Libraries (.so)
+				${CROSS_COMPILE}strip --strip-unneeded "$binary" 2>/dev/null ;;
+			*application/x-archive*)    # Libraries (.a)
+				${CROSS_COMPILE}strip --strip-debug "$binary" 2>/dev/null ;;
+			*application/x-object*)
+				case "$binary" in
+					*.ko)                   # Kernel module
+						${CROSS_COMPILE}strip --strip-unneeded "$binary" 2>/dev/null ;;
+					*)
+						continue;;
+				esac;;
+			*application/x-executable*) # Binaries
+				${CROSS_COMPILE}strip --strip-all "$binary" 2>/dev/null ;;
+			*)
+				continue ;;
+		esac
+	done
+
+}
+
 
 # rlxpkg_install <pkgfile>
 # install <pkgfile> in ROOT_DIR
