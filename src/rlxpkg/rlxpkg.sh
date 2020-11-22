@@ -178,6 +178,7 @@ rlxpkg_build() {
 
 # rlxpkg_genpkg <rcp_file> <spkg> <pkgdir>
 # ENVIRONMENT:              COMPRESS_ALGO: compression algo
+#                           BACKUP: file to take backup
 #
 # Error Code:               5: invalid args
 #                           6: failed to source recipe file
@@ -212,6 +213,11 @@ depends: $_dps" > .data/info
 
     for _i in install remove update usrgrp data ; do
         [[ -f "$rcp_dir/$_i" ]] && cp "$rcp_dir/$i" .data/
+    done
+
+    # backup conf
+    for _f in ${BACKUP} ; do
+        mv "${_f}" "${_f}.new"
     done
 
     tar -cf "${pkgdir}/${pkgfile}" --"${COMPRESS_ALGO}" * .data || return  7
@@ -269,6 +275,34 @@ strip_package() {
 				continue ;;
 		esac
 	done
+
+    # compress manpages
+
+    find . -type f -path "*/man/man*/*" | while read -r file; do
+		if [ "$file" = "${file%%.gz}" ]; then
+			gzip -9 -f "$file"
+		fi
+	done
+	find . -type l -path "*/man/man*/*" | while read -r file; do
+		FILE="${file%%.gz}.gz"
+		TARGET="$(readlink $file)"
+		TARGET="${TARGET##*/}"
+		TARGET="${TARGET%%.gz}.gz"
+		DIR=$(dirname "$FILE")
+		rm -f $file
+		if [ -e "$DIR/$TARGET" ]; then
+			ln -sf $TARGET $FILE
+		fi
+	done
+	if [ -d usr/share/info ]; then
+		(cd usr/share/info
+			for file in $(find . -type f); do
+				if [ "$file" = "${file%%.gz}" ]; then
+					gzip -9 "$file"
+				fi
+			done
+		)
+	fi
 
 }
 
