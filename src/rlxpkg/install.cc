@@ -175,13 +175,49 @@ librlxpkg::obj::Install(conf::obj& config, bool debug)
             }
         }
 
+        // Strip package
+
+        {
+            io::process("stripping package");
+            string _cmd = io::sprint(
+                _bash_pre,"'",
+                " source ",
+                libsh, "; ",
+                "NO_STRIP=",config.get("local","strip","")," "
+                "CROSS_COMPILE=",config.get("local","cross",""), " ",
+                "REMOVE_DOCS=",config.get("local","remove_docs","1"), " ",
+                " strip_package ",
+                _p_dir, " ",
+                __rcp_file,"'"
+                );
+
+            int ret = WEXITSTATUS(system(_cmd.c_str()));
+            string _mesg = "unknown error while stripping build";
+
+            switch (ret) {
+                case 5:
+                    _mesg = "Internal error, invalid argument provided to rxpkg.sh";
+                    break;
+
+                case 6:
+                    _mesg = "failed to load recipe file " + __rcp_file;
+                    break;       
+
+            }
+
+            if (ret != 0) {
+                _appctl.unlock_appctl(__name);
+                return err::obj(ret, _mesg);
+            }
+        }
+
 
         // compress package
 
         {
             io::process("compressing package");
             string _cmd = io::sprint(
-                _bash_pre,"'",
+                _bash_pre," -e '",
                 " source ",
                 libsh, "; ",
                 " rlxpkg_genpkg ",
@@ -222,9 +258,10 @@ librlxpkg::obj::Install(conf::obj& config, bool debug)
 
     string _cmd =
         io::sprint(
-        _bash_pre,"'",
+        _bash_pre," -e '",
         " source ",
         libsh," ; ",
+        " REINSTALL=", config.get("local","reinstall","0"),
         " WORK_DIR=", work_dir,
         " ROOT_DIR=", config.get("dir","roots","/"),
         " SKIP_EXECS=",config.get("local","skip_execs","0"),

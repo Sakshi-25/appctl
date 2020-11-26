@@ -46,6 +46,7 @@ namespace libapp {
             virtual rlx::err::obj Install(conf::obj & config, bool debug) { return err::obj(0x1245, "not implemented");}
             virtual rlx::err::obj Remove(conf::obj& config, bool debug) { return err::obj(0x1245, "not implemented");}
             virtual rlx::err::obj Sync(conf::obj& config, bool debug) { return err::obj(0x1245, "failed to sync repository");}
+            virtual rlx::err::obj ReInstall(conf::obj& conf, bool debug) { return err::obj(0x1245,"not implemented");}
 
     };
 
@@ -68,6 +69,11 @@ namespace libapp {
                         throw e;
                     }
                 }
+                load_modules();
+            }
+
+            obj(conf::obj& conf) : config(conf)
+            {
                 load_modules();
             }
             libapp::obj* get_app(const std::string& a, bool debug = false);

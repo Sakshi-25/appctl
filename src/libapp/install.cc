@@ -10,8 +10,12 @@ ctl::obj::Install(const std::string & app, bool debug)
         auto app_ptr = get_app(app, debug);
         if (app_ptr == nullptr) return err::obj(err::file_missing, "failed to get " +app);
 
-        auto app_data = is_installed(app, debug);
-        if (app_data.installed) return err::obj(112, app + " is already installed");
+        if (config.get("local","reinstall","0") == "0")
+        {
+            auto app_data = is_installed(app, debug);
+            if (app_data.installed) return err::obj(112, app + " is already installed");
+        }
+        
 
         auto deps = cal_dep(app_ptr, debug);
         io::process("checking dependencies");

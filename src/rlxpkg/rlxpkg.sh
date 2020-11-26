@@ -7,7 +7,7 @@ interrupted() {
     exit 5
 }
 
-APPCTL_SPECS="/etc/appctl.specs.sh"
+APPCTL_SPECS="${APPCTL_SPECS:-/etc/appctl.specs.sh}"
 
 [[ -f $APPCTL_SPECS ]] && . $APPCTL_SPECS
 
@@ -167,7 +167,7 @@ rlxpkg_build() {
 
     cd $src >/dev/null
 
-    (set -e -x; build 2>&1)
+    (set -e ; build 2>&1)
     if [[ $? != 0 ]] ; then
         return 7
     fi
@@ -197,7 +197,7 @@ rlxpkg_genpkg() {
     . $_rcp_file || return 6
 
     local pkgfile="${name}-${version}-${release}-$(uname -m).rlx"
-
+	[[ -d $pkg ]] || return 8
     cd $pkg &>/dev/null
 
     desc=$(cat "${_rcp_file}" | grep '# Description: ' | sed 's|# Description: ||g')
@@ -238,6 +238,7 @@ depends: $_dps" > .data/info
 #                   5: invalid arguments
 #                   6: failed to source recipe file                
 strip_package() {
+	[[ $SKIP_STRIP ]] && return 0
     # taken for scartchpkg https://github.com/venomlinux/scratchpkg/blob/master/pkgbuild
     [[ -z "${2}" ]] && return 5
     local _dir=${1}
@@ -324,16 +325,21 @@ strip_package() {
 # rlxpkg_install <pkgfile>
 # install <pkgfile> in ROOT_DIR
 # ENVIRONMENT:
-#                   ROOT_DIR:      install roots
-#                   SKIP_EXECS:    skip pre post executions scripts of installations
-#                   DATA_DIR:      data dir
-#                   COMPRESS_ALOG: compression algo
+#                   ROOT_DIR:           install roots
+#                   SKIP_EXECS:         skip pre post executions scripts of installations
+#                   DATA_DIR:           data dir
+#                   COMPRESS_ALOG:      compression algo
+#                   UPGRADE:            for updation
+#                   REINSTALL:          for reinstallation
+#                   IGNORE_CONFLICTS:   ignore file conflicts
 #
 # Error Code:       5: invalid args
 #                   6: pkgfile not found
 #                   7: invalid package
 #                   8: information data missing
 #                   9: failed to execute pre install script
+#                   10: tar -tf failed
+#                   11: file conflicts found
 rlxpkg_install() {
     [[ -z "${1}" ]] && return 5
 
@@ -345,6 +351,7 @@ rlxpkg_install() {
     local SKIP_EXECS=${SKIP_EXECS:-1}
     local DEBUG=0
 
+
     _debug() {
         [[ "$DEBUG" ]] && return
         echo "rlxpkg_install: $@"
@@ -355,7 +362,7 @@ rlxpkg_install() {
         return 6
     }
 
-    [[ -d "${WORK_DIR}" ]] && rm -r "${WORK_DIR}"
+    [[ -d "${WORK_DIR}" ]] && rm -rf "${WORK_DIR}"
     mkdir -p "${WORK_DIR}"
     
     tar -xf "${pkgfile}" --"${COMPRESS_ALOG}" -C "$WORK_DIR/" .data/info &>/dev/null || {
@@ -377,59 +384,209 @@ rlxpkg_install() {
         return 8
     fi
 
-    _execute_script() {
-        if [[ "${ROOT_DIR}" == "/" ]] ; then
-            _xectr="bash"
-        else
-            _xectr="xchroot '${ROOT_DIR}'"
-        fi
 
-        _xectr $@
+# Checking file for conflicts
+
+    _PKGFILES="/tmp/$name.pkgfiles"
+    _CONFLICTS="/tmp/$name.conflicts"
+    
+    tar -tf "${pkgfile}" -- "${COMPRESS_ALGO}" > $_PKGFILES 2>/dev/null {
+        _debug "${pkgfile} is corrupt"
+        return 10
     }
 
-    tar -xf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${WORK_DIR}/" .data/install &>/dev/null && {
-        $_xectr "${WORK_DIR}/.data/install" "pre" "$version" "$release"
-        if [[ $? != 0 ]] ; then
-            _debug "failed to execute pre install script"
-            return 9
-        fi
-    }
+    if [[ ! "$IGNORE_CONFLICTS" ]] ; then
+        grep -Ev "^.data*" "$_PKGFILES" | grep -v '/$' | while read -r line ; do
+            [[ "$line" = "${line%.*}.new" ]] && line=${line%.*}
 
-    # TODO add option to check conficting files
+            if [[ -e "$ROOT_DIR/$line" ]] || [[ -L "$ROOT_DIR/$line" ]] ; then
+                if [[ "$UPGRADE" ]] || [[ "$REINSTALL" ]] ; then
+                    if ! grep -Fqx "$line" "$DATA_DIR/$name/files" ; then
+                        echo "$line" >> $_CONFLICTS
+                    fi
+                else
+                    echo "$line" >> $_CONFLICTS
+                fi
+            fi
+        done
+
+        if [[ -e "$_CONFLICTS" ]] ; then
+            _debug "file conflicts found !"
+            cat $_CONFLICTS
+            return 11
+        fi
+    fi
     
     [[ ! -d "${ROOT_DIR}" ]] && mkdir -p "${ROOT_DIR}"
 
+    _execute_script() {
 
-    tar --keep-directory-symlink -pxvf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${ROOT_DIR}/" | while read -r line ; do
-        [[ "${line:0:1}" == "." ]] && {
-            _debug "skipping ${line} hidden data"
-            continue
+        _create_dirs() {
+            { cat $1; echo; } | while read -r dir mod uid gid args ; do
+                mkdir -p $dir
+                [[ "$mod" != '-' ]] && chmod "$mod" "$dir"
+                [[ "$uid" != '-' ]] && chown "$uid" "$dir"
+                [[ "$gid" != '-' ]] && chown :$gid "$dir"
+            done
         }
+
+        _create_usrgrp() {
+            { cat "$1"; echo; } | while read _ty _name _id _gid _disname _shell _dir ; do
+                if [[ "$_ty" == "usr" ]] ; then
+                    [[ "$_gid"     = "-" ]] && gid=""      || gid="-g $gid"
+                    [[ "$_disname" = "-" ]] && _disname="" || _disname="-c $_disname"
+                    [[ "$_shell"   = "-" ]] && _shell=""   || _shell="-s $_shell"
+                    [[ "$_dir"     = "-" ]] && _dir=""     || _dir="-d $_dir"
+                    useradd "$_disname" "$_dir" -u "$_id" "$_gid" "$_shell" "$_name"
+                
+                elif [[ "$_ty" == "grp" ]] ; then
+                    groupadd -g "$_id" "$_name"
+                fi
+            done
+        }
+
+        _push_data() {
+            _filename=$(head -n 1 $1)
+            _data=$(tail -n+2 $1)
+            grep -qxF "$_data" "$_filename" || {
+                echo -e "\n$_data" >> $_filename
+            }
+        }
+
+        _pop_data() {
+            _filename=$(head -n 1 $1)
+            _data=$(tail -n+2 $1)
+            grep -qxF "$_data" "$_filename" || {
+                (tail -n+2 $1; echo) | while read line ; do
+                    sed -i "s|$line||g" $_filename
+                done
+            }
+        }
+
+        local _file="${1}"
+        shift
+
+        [[ "$ROOT_DIR" == "/" ]] && _xectr="bash" || _xectr="xchroot '${ROOT_DIR}' "
+
+        tar -xf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${WORK_DIR}/" .data/${_file} &>/dev/null && {
+            
+            case "$_file" in
+                install|uninstall|remove)
+                    _debug "executing ${_file}ation script"
+                    $_xectr "${WORK_DIR}/.data/$_file" "$@"
+                    ;;
+                
+                usrgrp)
+                    _debug "creating required user and groups"
+                    _create_usrgrp "${WORK_DIR}/.data/$_file"
+                    ;;
+                
+                dirs)
+                    _debug "creating required directories"
+                    _create_dirs "${WORK_DIR}/.data/$_file"
+                    ;;
+                
+                push)
+                    _debug "patching required files"
+                    _push_data "${WORK_DIR}/.data/$_file"
+                    ;;
+                
+                pop)
+                    _debug "unpatching files"
+                    _pop_data "${WORK_DIR}/.data/$_file"
+                    ;;
+
+                *)
+                    _debug "invalid execution script"
+
+                    return 9
+            esac
+        }
+    }
+
+# Pre install scripts
+    [[ "$UPGRADE" ]] && _execute_script "upgrade" "pre" "$version" "$release"   || \
+        _execute_script "install" "pre" "$version" "$release"
+
+# Installations
+
+    tar --keep-directory-symlink --exclude='^.data*' -pxvf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${ROOT_DIR}/" | while read -r line ; do
+        
         if [[ "$line" == "${line%.*}.new" ]] ; then
             line="${line%.*}"
-            mv "${ROOT_DIR}/${line}.new" "${ROOT_DIR}/${line}"
+
+            if [[ "$UPGRADE" ]] || [[ "$REINSTALL" ]] ; then
+                if [[ ! -e "$ROOT_DIR/$line" ]] || [[ "$NO_BACKUP" = yes ]] ; then
+                    mv "${ROOT_DIR}/${line}.new" "${ROOT_DIR}/${line}"
+                fi
+            else
+                mv "${ROOT_DIR}/${line}.new" "${ROOT_DIR}/${line}"
+            fi
         fi
         echo "$line" >> "${WORK_DIR}/${name}.files"
     done
 
+
+# remove old files
+    if [[ "$UPGRADE" ]] || [[ "$REINSTALL" ]] ; then
+        _oldfiles="/tmp/$name.oldfiles"
+        _olddirs="/tmp/$name.olddir"
+        _rsrv_dir="/tmp/$name.rsrvdir"
+        _oldall="/tmp/$name.oldall"
+
+        grep '/$' $DATA_DIR/*/files \
+            |   grep -v "$DATA_DIR/$name/files" \
+            |   awk -F : '{print $2}'   \
+            |   sort \
+            |   uniq > $_rsrv_dir
+
+        grep -Fxv -f "${WORK_DIR}/${name}.files" $DATA_DIR/$name/files > $_oldall
+        grep -v '/$' "$_oldall" | tac > "$_oldfiles"
+        grep -Fxv -f "$_rsrv_dir" "$_oldall" | grep '/$' | tac > "$_olddirs"
+
+        (cd "$ROOT_DIR"
+            [[ -s "$_oldfiles" ]] && xargs -s "$_oldfiles" -d '\n' rm
+            [[ -s "$_olddirs"  ]] && xargs -s "$_olddirs"  -d '\n' rmdir
+        )
+
+        rm -f "$_oldfiles" "$_olddirs" "$_oldall" "$_rsrv_dir"
+
+    fi
+
     
-    [[ -d ${DATA_DIR} ]] || mkdir -p "$DATA_DIR"
-    rm -rf ${DATA_DIR}/${name}
+    rm -rf "$DATA_DIR/$name"
 
-    tar -xf "${pkgfile}" -C $WORK_DIR .data
+    mkdir -p "$DATA_DIR/$name"	
+	
+    tar -xf "${pkgfile}" .data -C "${WORK_DIR}" 
     mv $WORK_DIR/.data "$DATA_DIR/${name}"
-
     mv "$WORK_DIR/${name}.files" "$DATA_DIR/${name}/files"
 
     echo -e "\ninstalled: $(date +'%I:%M:%S %p %D:%m:%Y')" >> "$DATA_DIR/${name}/info"
 
-    tar -xf "${pkgfile}" --"${COMPRESS_ALGO}" -C "${WORK_DIR}/" .data/install &>/dev/null && {
-        $_xectr "${WORK_DIR}/.data/install" "post" "$version" "$release"
-        if [[ $? != 0 ]] ; then
-            _debug "failed to execute post install script"
-            return 9
-        fi
+# post install
+    [[ "$UPGRADE" ]] && _execute_script "upgrade" "post" "$version" "$release"   || \
+    _execute_script "install" "post" "$version" "$release"
+
+    _execute_script "usrgrp"
+    _execute_script "dirs"
+    if [[ "$UPGRADE" ]] || [[ "$REINSTALL" ]] ; then 
+        _debug "skipping patches"
+    else
+        _execute_script "push" 
+    fi
+
+    _check_and_execute() {
+        cat $DATA_DIR/$name/files | grep -q "$1" && {
+            $2
+        }
     }
+
+    _check_and_execute "share/mime" "update-mime-database /usr/share/mime/"
+    _check_and_execute "share/applications" "update-desktop-database"
+    _check_and_execute "share/glib-2.0/schemas" "glib-compile-schemas /usr/share/glib-2.0/schemas"
+    _check_and_execute "lib/gdk-pixbuf-2.0./2.10.0/loaders/" "gdk-pixbuf-query-loaders --update-cache"
+
 
     if [[ -x "${ROOT_DIR}/usr/sbin/ldconfig" ]] ; then
         "$ROOT_DIR/"usr/sbin/ldconfig "${ROOT_DIR}/" &>/dev/null || return 0

@@ -78,6 +78,7 @@ obj::load(const std::string& __r)
             std::stringstream ss(__val);
             std::string l;
             while(ss >> l) {
+                if (l == "|") continue;
                 __depends.push_back(l);
             }
         }
